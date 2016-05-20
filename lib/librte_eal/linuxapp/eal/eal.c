@@ -81,8 +81,11 @@
 #include "eal_filesystem.h"
 #include "eal_hugepages.h"
 #include "eal_options.h"
-
+#ifdef RTE_LIBRW_PIOT
+#define MEMSIZE_IF_NO_HUGE_PAGE (1536ULL * 1024ULL * 1024ULL)
+#else
 #define MEMSIZE_IF_NO_HUGE_PAGE (64ULL * 1024ULL * 1024ULL)
+#endif
 
 #define SOCKET_MEM_STRLEN (RTE_MAX_NUMA_NODES * 10)
 
@@ -196,8 +199,8 @@ rte_eal_config_create(void)
 	retval = fcntl(mem_cfg_fd, F_SETLK, &wr_lock);
 	if (retval < 0){
 		close(mem_cfg_fd);
-		rte_exit(EXIT_FAILURE, "Cannot create lock on '%s'. Is another primary "
-				"process running?\n", pathname);
+		rte_exit(EXIT_FAILURE, "Cannot create lock on '%s'm error %d, fd %d. Is another primary "
+				"process running?\n", pathname, retval, mem_cfg_fd);
 	}
 
 	rte_mem_cfg_addr = mmap(rte_mem_cfg_addr, sizeof(*rte_config.mem_config),
@@ -317,9 +320,15 @@ eal_hugedirs_unlock(void)
 
 	for (i = 0; i < MAX_HUGEPAGE_SIZES; i++)
 	{
-		/* skip uninitialized */
-		if (internal_config.hugepage_info[i].lock_descriptor < 0)
-			continue;
+#ifdef RTE_LIBRW_PIOT
+          /* skip uninitialized */
+          if (internal_config.hugepage_info[i].lock_descriptor <= 0)
+            continue;
+#else
+          /* skip uninitialized */
+          if (internal_config.hugepage_info[i].lock_descriptor < 0)
+            continue;
+#endif
 		/* unlock hugepage file */
 		flock(internal_config.hugepage_info[i].lock_descriptor, LOCK_UN);
 		close(internal_config.hugepage_info[i].lock_descriptor);
@@ -925,3 +934,333 @@ rte_eal_check_module(const char *module_name)
 
 	return ret;
 }
+#ifdef RTE_LIBRW_PIOT
+
+rte_application_log_handler_t rte_app_log_hook = NULL;
+
+void rte_set_application_log_hook(rte_application_log_handler_t log_fn)
+{
+  rte_app_log_hook = log_fn;
+}
+
+/* 
+ * This function is needed as part of DPDK RiftIO PIOT implementation.
+ * Parses arguments without any thread or CPU core parameter requirements.
+ */
+#define RTE_HUGEPAGE_PREFIX_LEN 128
+char hugepage_prefix_str[RTE_HUGEPAGE_PREFIX_LEN];
+
+static int
+eal_parse_args_no_thread(int argc, char **argv)
+{
+	int opt, ret, i;
+	char **argvopt;
+	int option_index;
+	char *prgname = argv[0];
+	static struct option lgopts[] = {
+		{OPT_NO_HUGE, 0, 0, 0},
+		{OPT_NO_PCI, 0, 0, 0},
+		{OPT_NO_HPET, 0, 0, 0},
+		{OPT_VMWARE_TSC_MAP, 0, 0, 0},
+		{OPT_HUGE_DIR, 1, 0, 0},
+		{OPT_NO_SHCONF, 0, 0, 0},
+		{OPT_PROC_TYPE, 1, 0, 0},
+		{OPT_FILE_PREFIX, 1, 0, 0},
+		{OPT_SOCKET_MEM, 1, 0, 0},
+                {OPT_SYSLOG, 1, NULL, 0},
+		{0, 0, 0, 0}
+	};
+
+	argvopt = argv;
+
+	internal_config.memory = 0;
+	internal_config.force_nrank = 0;
+	internal_config.force_nchannel = 0;
+	internal_config.hugefile_prefix = HUGEFILE_PREFIX_DEFAULT;
+	internal_config.hugepage_dir = NULL;
+	internal_config.force_sockets = 0;
+	internal_config.syslog_facility = LOG_DAEMON;
+#ifdef RTE_LIBEAL_USE_HPET
+	internal_config.no_hpet = 0;
+#else
+	internal_config.no_hpet = 1;
+#endif
+	/* zero out the NUMA config */
+	for (i = 0; i < RTE_MAX_NUMA_NODES; i++)
+		internal_config.socket_mem[i] = 0;
+
+	/* zero out hugedir descriptors */
+	for (i = 0; i < MAX_HUGEPAGE_SIZES; i++)
+		internal_config.hugepage_info[i].lock_descriptor = 0;
+
+	internal_config.vmware_tsc_map = 0;
+
+	while ((argc > 1) && ((opt = getopt_long(argc, argvopt, "m:n:r:v",
+				  lgopts, &option_index)) != EOF)) {
+
+          int ret;
+          
+          /* getopt is not happy, stop right now */
+          if (opt == '?')
+            return -1;
+          
+          ret = eal_parse_common_option(opt, optarg, &internal_config);
+          /* common parser is not happy */
+          if (ret < 0) {
+            eal_usage(prgname);
+            return -1;
+          }
+          /* common parser handled this option */
+          if (ret == 0) {
+            continue;
+          }
+          
+          switch (opt) {
+            /* size of memory */
+            case 'm':
+              internal_config.memory = atoi(optarg);
+              internal_config.memory *= 1024ULL;
+              internal_config.memory *= 1024ULL;
+              break;
+              /* force number of channels */
+            case 'n':
+              internal_config.force_nchannel = atoi(optarg);
+              if (internal_config.force_nchannel == 0 ||
+                  internal_config.force_nchannel > 4) {
+                RTE_LOG(ERR, EAL, "invalid channel number\n");
+                eal_usage(prgname);
+                return -1;
+              }
+              break;
+              /* force number of ranks */
+            case 'r':
+              internal_config.force_nrank = atoi(optarg);
+              if (internal_config.force_nrank == 0 ||
+                  internal_config.force_nrank > 16) {
+                RTE_LOG(ERR, EAL, "invalid rank number\n");
+                eal_usage(prgname);
+                return -1;
+              }
+              break;
+            case 'v':
+              /* since message is explicitly requested by user, we
+               * write message at highest log level so it can always be seen
+               * even if info or warning messages are disabled */
+              RTE_LOG(CRIT, EAL, "RTE Version: '%s'\n", rte_version());
+              break;
+              
+              /* long options */
+            case 0:
+              if (!strcmp(lgopts[option_index].name, OPT_NO_HUGE)) {
+                internal_config.no_hugetlbfs = 1;
+              }
+              else if (!strcmp(lgopts[option_index].name, OPT_NO_PCI)) {
+                internal_config.no_pci = 1;
+              }
+              else if (!strcmp(lgopts[option_index].name, OPT_NO_HPET)) {
+                internal_config.no_hpet = 1;
+              }
+              else if (!strcmp(lgopts[option_index].name, OPT_VMWARE_TSC_MAP)) {
+                internal_config.vmware_tsc_map = 1;
+              }
+              else if (!strcmp(lgopts[option_index].name, OPT_NO_SHCONF)) {
+                internal_config.no_shconf = 1;
+              }
+              else if (!strcmp(lgopts[option_index].name, OPT_HUGE_DIR)) {
+                internal_config.hugepage_dir = optarg;
+              }
+              else if (!strcmp(lgopts[option_index].name, OPT_FILE_PREFIX)) {
+                internal_config.hugefile_prefix = optarg;
+              }
+              else if (!strcmp(lgopts[option_index].name, OPT_SOCKET_MEM)) {
+                if (eal_parse_socket_mem(optarg) < 0) {
+                  RTE_LOG(ERR, EAL, "invalid parameters for --"
+                          OPT_SOCKET_MEM "\n");
+                  eal_usage(prgname);
+                  return -1;
+                }
+              }
+              break;
+              
+            default:
+              eal_usage(prgname);
+              return -1;
+          }
+	}
+        
+	if (internal_config.process_type == RTE_PROC_AUTO){
+          internal_config.process_type = eal_proc_type_detect();
+	}
+	if (internal_config.process_type == RTE_PROC_INVALID){
+          RTE_LOG(ERR, EAL, "Invalid process type specified\n");
+          eal_usage(prgname);
+          return -1;
+	}
+	if (internal_config.force_nchannel == 0) {
+          /*
+           * This MUST be specified in as an arg for 
+           * PIOT init - TBD
+           * setting 4 as default now
+           */
+          internal_config.force_nchannel = 4;
+        }
+        
+	if (index(internal_config.hugefile_prefix,'%') != NULL){
+          RTE_LOG(ERR, EAL, "Invalid char, '%%', in '"OPT_FILE_PREFIX"' option\n");
+          eal_usage(prgname);
+          return -1;
+	}
+	if (internal_config.memory > 0 && internal_config.force_sockets == 1) {
+          RTE_LOG(ERR, EAL, "Options -m and --socket-mem cannot be specified "
+                  "at the same time\n");
+          eal_usage(prgname);
+          return -1;
+	}
+#if 0 /* allow  --no-huge and -m */
+	/* --no-huge doesn't make sense with either -m or --socket-mem */
+	if (internal_config.no_hugetlbfs &&
+            (internal_config.memory > 0 ||
+             internal_config.force_sockets == 1)) {
+          RTE_LOG(ERR, EAL, "Options -m or --socket-mem cannot be specified "
+                  "together with --no-huge!\n");
+          eal_usage(prgname);
+		return -1;
+	}
+#else
+	if (internal_config.no_hugetlbfs && (internal_config.force_sockets == 1)) {
+		RTE_LOG(ERR, EAL, "Options -m or --socket-mem cannot be specified "
+                        "together with --no-huge!\n");
+		eal_usage(prgname);
+		return -1;
+        }
+#endif
+        
+        if (internal_config.no_hugetlbfs) {
+          snprintf(hugepage_prefix_str, RTE_HUGEPAGE_PREFIX_LEN-1, "%s%d",internal_config.hugefile_prefix, getpid());
+          internal_config.hugefile_prefix = hugepage_prefix_str;
+        }
+
+	if (optind >= 0)
+		argv[optind-1] = prgname;
+
+	/* if no memory amounts were requested, this will result in 0 and
+	 * will be overriden later, right after eal_hugepage_info_init() */
+	for (i = 0; i < RTE_MAX_NUMA_NODES; i++)
+		internal_config.memory += internal_config.socket_mem[i];
+
+	ret = optind-1;
+	optind = 0; /* reset getopt lib */
+	return ret;
+}
+
+/*
+ * This function is needed as part of DPDK RiftIO PIOT implementation.
+ * Initialize DPDK EAL without creating threads.
+ */
+int
+rte_eal_init_no_thread(int argc, char **argv)
+{
+  int fctret;
+  static rte_atomic32_t run_once = RTE_ATOMIC32_INIT(0);
+
+  if (!rte_atomic32_test_and_set(&run_once))
+    return -1;
+  
+  if (rte_eal_log_early_init() < 0)
+    rte_panic("Cannot init early logs\n");
+
+  fctret = eal_parse_args_no_thread(argc, argv);
+  if (fctret < 0) {
+    exit(1);
+  }
+
+  if (internal_config.no_hugetlbfs == 0 &&
+      internal_config.process_type != RTE_PROC_SECONDARY &&
+      eal_hugepage_info_init() < 0)
+    rte_panic("Cannot get hugepage information\n");
+
+  if (internal_config.memory == 0 && internal_config.force_sockets == 0) {
+    if (internal_config.no_hugetlbfs)
+      internal_config.memory = MEMSIZE_IF_NO_HUGE_PAGE;
+    else
+      internal_config.memory = eal_get_hugepage_mem_size();
+  }
+
+  if (internal_config.vmware_tsc_map == 1) {
+#ifdef RTE_LIBRTE_EAL_VMWARE_TSC_MAP_SUPPORT
+    rte_cycles_vmware_tsc_map = 1;
+    RTE_LOG (DEBUG, EAL, "Using VMWARE TSC MAP, "
+        "you must have monitor_control.pseudo_perfctr = TRUE\n");
+#else
+    RTE_LOG (WARNING, EAL, "Ignoring --vmware-tsc-map because "
+        "RTE_LIBRTE_EAL_VMWARE_TSC_MAP_SUPPORT is not set\n");
+#endif
+  }
+
+  rte_srand(rte_rdtsc());
+
+  srand(1); /* init with proper seed - TBD*/
+
+  rte_config_init();
+
+  if (rte_eal_cpu_init() < 0)
+    rte_panic("Cannot detect lcores\n");
+
+  if (rte_eal_memory_init() < 0)
+    rte_panic("Cannot init memory\n");
+
+  /* the directories are locked during eal_hugepage_info_init */
+  eal_hugedirs_unlock();
+
+  if (rte_eal_memzone_init() < 0)
+    rte_panic("Cannot init memzone\n");
+
+  if (rte_eal_tailqs_init() < 0)
+    rte_panic("Cannot init tail queues for objects\n");
+  
+#ifdef RTE_LIBRTE_IVSHMEM
+	if (rte_eal_ivshmem_obj_init() < 0)
+		rte_panic("Cannot init IVSHMEM objects\n");
+#endif
+
+        
+  if (rte_eal_log_init(argv[0], internal_config.syslog_facility) < 0)
+    rte_panic("Cannot init logs\n");
+
+  if (rte_eal_alarm_init() < 0)
+    rte_panic("Cannot init interrupt-handling thread\n");
+
+  if (rte_eal_intr_init() < 0)
+    rte_panic("Cannot init interrupt-handling thread\n");
+
+  if (rte_eal_timer_init() < 0)
+    rte_panic("Cannot init HPET or TSC timers\n");
+
+  /*
+   * Read PCI device file 
+   */
+  if (rte_eal_pci_init() < 0)
+    rte_panic("Cannot init PCI\n");
+
+  //Not sure whether this call is required, to be checked later (TBD)
+  //eal_check_mem_on_local_socket();
+
+  rte_eal_mcfg_complete();
+
+  /*
+   * This should be moved out TBD
+   */
+  if (rte_eal_dev_init() < 0)
+    rte_panic("Cannot init non-PCI eth_devs\n");
+  
+  return fctret;
+}
+
+void
+eal_exit_cleanup(void)
+{
+   const char *pathname = eal_runtime_config_path();
+   unlink(pathname);
+}
+
+#endif

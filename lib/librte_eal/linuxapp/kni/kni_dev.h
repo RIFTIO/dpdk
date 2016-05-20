@@ -35,6 +35,11 @@
 #ifdef RTE_KNI_VHOST
 #include <net/sock.h>
 #endif
+#ifdef RTE_LIBRW_PIOT
+#ifdef RTE_LIBRW_NOHUGE
+#include "kni_netlink.h"
+#endif
+#endif
 
 #include <exec-env/rte_kni_common.h>
 #define KNI_KTHREAD_RESCHEDULE_INTERVAL 5 /* us */
@@ -95,7 +100,47 @@ struct kni_dev {
 
 	/* synchro for request processing */
 	unsigned long synchro;
-
+#ifdef RTE_LIBRW_PIOT
+  char           netns_name[64];
+  uint64_t       rx_treat_as_tx; //not
+  uint64_t       rx_treat_as_tx_delivered;//not
+  uint64_t       rx_treat_as_tx_filtered; //not
+  uint64_t       rx_only; //not
+  uint64_t       rx_filtered; //not
+  uint64_t       rx_delivered;
+  uint64_t       tx_no_txq;
+  uint64_t       tx_no_allocq;
+  uint64_t       tx_enq_fail;
+  uint64_t       tx_deq_fail;
+  uint64_t       rx_drop_noroute;//not
+  uint64_t       tx_attempted;
+  uint64_t       v4_policy_fwd;
+  uint64_t       v6_policy_fwd;
+  uint64_t       forced_ndisc_sent;
+  uint64_t       forced_arp_sent;
+  uint64_t       bad_encap;
+  uint64_t       nl_tx_queued;
+  uint64_t       nl_tx_dequeued;
+  uint64_t       nl_rx_queued;
+  uint64_t       nl_rx_dequeued;
+  
+  unsigned char	 *dev_addr;
+  uint8_t        no_data;
+  uint8_t        no_tx;
+  uint8_t        no_pci;
+  uint8_t        loopback;
+  uint8_t        no_user_ring;
+  uint8_t        always_up;
+  uint16_t       mtu;
+  uint16_t       vlanid;
+  char           mac[6];
+#ifdef RTE_LIBRW_NOHUGE
+  struct sk_buff_head    skb_tx_queue;
+  struct sk_buff_head    skb_rx_queue;
+  uint8_t        nohuge;
+  uint32_t       nl_pid;
+#endif
+#endif /*piot*/
 #ifdef RTE_KNI_VHOST
 	struct kni_vhost_queue* vhost_queue;
 	volatile enum {
@@ -145,5 +190,13 @@ struct kni_vhost_queue {
 #else
 	#define KNI_DBG_TX(args...)
 #endif
-
+#ifdef RTE_LIBRW_PIOT
+void kni_net_process_rx_packet(struct sk_buff *skb,
+                                 struct net_device *dev,
+                                 struct rw_kni_mbuf_metadata *meta_data);
+#ifdef RTE_LIBRW_NOHUGE
+void kni_net_rx_netlink(struct kni_dev *kni);
+void kni_net_tx_netlink(struct kni_dev *kni);
+#endif
+#endif
 #endif

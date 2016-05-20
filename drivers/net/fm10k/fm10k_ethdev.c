@@ -1170,7 +1170,11 @@ fm10k_link_update(struct rte_eth_dev *dev,
 	/* The host-interface link is always up.  The speed is ~50Gbps per Gen3
 	 * x8 PCIe interface. For now, we leave the speed undefined since there
 	 * is no 50Gbps Ethernet. */
-	dev->data->dev_link.link_speed  = 0;
+#ifdef RTE_LIBRW_PIOT
+	dev->data->dev_link.link_speed  = ETH_LINK_SPEED_40G;
+#else
+        dev->data->dev_link.link_speed  = 0;
+#endif
 	dev->data->dev_link.link_duplex = ETH_LINK_FULL_DUPLEX;
 	dev->data->dev_link.link_status = 1;
 
@@ -2751,7 +2755,11 @@ static struct eth_driver rte_pmd_fm10k = {
 	.pci_drv = {
 		.name = "rte_pmd_fm10k",
 		.id_table = pci_id_fm10k_map,
-		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_DETACHABLE,
+#if defined (RTE_EAL_UNBIND_PORTS) && defined(RTE_LIBRW_PIOT)
+                .drv_flags = RTE_PCI_DRV_FORCE_UNBIND | RTE_PCI_DRV_INTR_LSC | RTE_PCI_DRV_DETACHABLE,
+#else
+                .drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_DETACHABLE,
+#endif
 	},
 	.eth_dev_init = eth_fm10k_dev_init,
 	.eth_dev_uninit = eth_fm10k_dev_uninit,
@@ -2778,3 +2786,32 @@ static struct rte_driver rte_fm10k_driver = {
 };
 
 PMD_REGISTER_DRIVER(rte_fm10k_driver);
+
+
+#if 0
+  #ifdef RTE_LIBRW_PIOT
+static void fm10k_init_reta(struct rte_eth_dev *dev)
+{
+  struct fm10k_hw *hw = FM10K_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+  u16 i, rss_i = dev->data->nb_rx_queues;
+  u32 reta, base;
+
+  /* Populate the redirection table 4 entries at a time.  To do this
+   * we are generating the results for n and n+2 and then interleaving
+   * those with the results with n+1 and n+3.
+   */
+  for (i = FM10K_RETA_SIZE; i--;) {
+    /* first pass generates n and n+2 */
+    base = ((i * 0x00040004) + 0x00020000) * rss_i;
+    reta = (base & 0x3F803F80) >> 7;
+    
+    /* second pass generates n+1 and n+3 */
+    base += 0x00010001 * rss_i;
+    reta |= (base & 0x3F803F80) << 1;
+    
+    FM10K_WRITE_REG(hw,  FM10K_RETA(0, i),
+                    reta);
+  }
+}
+#endif
+#endif

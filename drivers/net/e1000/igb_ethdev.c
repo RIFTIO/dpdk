@@ -959,8 +959,14 @@ static struct eth_driver rte_igb_pmd = {
 	.pci_drv = {
 		.name = "rte_igb_pmd",
 		.id_table = pci_id_igb_map,
-		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_INTR_LSC |
-			RTE_PCI_DRV_DETACHABLE,
+		.drv_flags =
+#if defined (RTE_EAL_UNBIND_PORTS) && defined(RTE_LIBRW_PIOT)
+                RTE_PCI_DRV_FORCE_UNBIND
+#else
+                RTE_PCI_DRV_NEED_MAPPING
+#endif
+                | RTE_PCI_DRV_INTR_LSC |
+                RTE_PCI_DRV_DETACHABLE,
 	},
 	.eth_dev_init = eth_igb_dev_init,
 	.eth_dev_uninit = eth_igb_dev_uninit,
@@ -974,7 +980,13 @@ static struct eth_driver rte_igbvf_pmd = {
 	.pci_drv = {
 		.name = "rte_igbvf_pmd",
 		.id_table = pci_id_igbvf_map,
-		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_DETACHABLE,
+		.drv_flags =
+#if defined (RTE_EAL_UNBIND_PORTS) && defined(RTE_LIBRW_PIOT)
+                RTE_PCI_DRV_FORCE_UNBIND
+#else
+                 RTE_PCI_DRV_NEED_MAPPING
+#endif
+                | RTE_PCI_DRV_DETACHABLE,
 	},
 	.eth_dev_init = eth_igbvf_dev_init,
 	.eth_dev_uninit = eth_igbvf_dev_uninit,
@@ -2429,10 +2441,15 @@ eth_igb_interrupt_action(struct rte_eth_dev *dev)
 		igb_pf_mbx_process(dev);
 		intr->flags &= ~E1000_FLAG_MAILBOX;
 	}
-
+#if defined(RTE_LIBRW_PIOT)
+        /*
 	igb_intr_enable(dev);
 	rte_intr_enable(&(dev->pci_dev->intr_handle));
-
+        */
+#else
+        igb_intr_enable(dev);
+	rte_intr_enable(&(dev->pci_dev->intr_handle));
+#endif
 	if (intr->flags & E1000_FLAG_NEED_LINK_UPDATE) {
 		intr->flags &= ~E1000_FLAG_NEED_LINK_UPDATE;
 

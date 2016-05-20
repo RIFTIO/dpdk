@@ -66,7 +66,9 @@ endif
 
 RTE_TARGET ?= $(RTE_ARCH)-$(RTE_MACHINE)-$(RTE_EXEC_ENV)-$(RTE_TOOLCHAIN)
 
-RTE_LIBNAME := dpdk
+#RTE_LIBRW_PIOT
+#RTE_LIBNAME := dpdk
+RTE_LIBNAME := intel_dpdk
 
 ifeq ($(BUILDING_RTE_SDK),)
 # if we are building an external app/lib, include internal/rte.extvars.mk that will

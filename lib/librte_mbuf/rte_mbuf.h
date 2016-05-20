@@ -93,6 +93,12 @@ extern "C" {
 #define PKT_RX_HBUF_OVERFLOW (0ULL << 0)  /**< Header buffer overflow. */
 #define PKT_RX_RECIP_ERR     (0ULL << 0)  /**< Hardware processing error. */
 #define PKT_RX_MAC_ERR       (0ULL << 0)  /**< MAC error. */
+#ifdef RTE_LIBRW_PIOT
+#define PKT_RX_IPV4_HDR      (1ULL << 5)  /**< RX packet with IPv4 header. */
+#define PKT_RX_IPV4_HDR_EXT  (1ULL << 6)  /**< RX packet with extended IPv4 header. */
+#define PKT_RX_IPV6_HDR      (1ULL << 7)  /**< RX packet with IPv6 header. */
+#define PKT_RX_IPV6_HDR_EXT  (1ULL << 8)  /**< RX packet with extended IPv6 header. */
+#endif
 #define PKT_RX_IEEE1588_PTP  (1ULL << 9)  /**< RX IEEE1588 L2 Ethernet PT Packet. */
 #define PKT_RX_IEEE1588_TMST (1ULL << 10) /**< RX IEEE1588 L2/L4 timestamped packet.*/
 #define PKT_RX_FDIR_ID       (1ULL << 13) /**< FD id reported if FDIR match. */
@@ -731,6 +737,42 @@ typedef uint64_t MARKER64[0]; /**< marker that allows us to overwrite 8 bytes
 /** Opaque rte_mbuf_offload  structure declarations */
 struct rte_mbuf_offload;
 
+#ifdef RTE_LIBRW_PIOT
+  struct rw_mbuf_metadata{
+    void    *userdata;
+    uint8_t pad0:4;
+    uint8_t trafgen_coherency:4; //coherency used by trafgen
+    uint8_t  vf_ttl;
+    uint8_t  vf_pathid;
+    uint8_t quick_flags;             /**< Used by Kni to indicate to the kernel whether to drop the packets or treat it as outgoing. */
+#define RW_FPATH_PKT_KNI_SEND_RX           0x01
+#define RW_FPATH_PKT_KNI_DISCARD_ON_RX     0x02
+#define RW_FPATH_PKT_KNI_TREAT_AS_TX       0x04
+#define RW_FPATH_PKT_KNI_ALREADY_FILTERED  0x08
+#define RW_FPATH_PKT_KNI_NEED_FLOW_LOOKUP  0x10
+#define RW_FPATH_PKT_FWD_ON_INCOMING_LPORT 0x20
+#define RW_FPATH_PKT_INCLUDE_L2_HEADER     0x40
+    uint16_t  l3_offset; //AKKI we are resuing the field l3_offset for kni netlink communication when no huge pages are available.
+    uint16_t  vf_encap; //AKKI check if this needs to be a uint16_t
+    uint16_t  payload;
+    uint16_t  pad1;
+    uint32_t mdata_flag;
+    uint32_t vf_lportid;
+    uint32_t vf_portmeta;
+    uint32_t vf_ncid;
+    uint32_t vf_nh_policy_fwd[4];
+    uint32_t vf_nh_policy_lportid;
+    uint32_t vf_flow_cache_target;
+    uint32_t local_flags;
+#define RW_MBUF_LOCAL_FLAGS_NO_CLASSIFICATION 0x01
+    uint32_t vf_signid;
+    uint32_t vf_flowid;
+    uint32_t vf_vsaphandle;
+    //uint32_t vf_flowid_msw;
+    //uint32_t vf_flowid_lsw;    
+  };
+#endif
+  
 /**
  * The generic rte_mbuf, containing a packet mbuf.
  */
@@ -818,6 +860,9 @@ struct rte_mbuf {
 
 	union {
 		void *userdata;   /**< Can be used for external metadata */
+#ifdef RTE_LIBRW_PIOT
+          struct rw_mbuf_metadata rw_data;
+#endif
 		uint64_t udata64; /**< Allow 8-byte userdata on 32-bit */
 	};
 
@@ -1079,6 +1124,14 @@ static inline void __attribute__((always_inline))
 __rte_mbuf_raw_free(struct rte_mbuf *m)
 {
 	RTE_MBUF_ASSERT(rte_mbuf_refcnt_read(m) == 0);
+#ifdef RTE_LIBRW_PIOT
+        m->rw_data.payload = 0;
+        m->rw_data.vf_encap = 0;
+        m->rw_data.mdata_flag = 0;
+        m->rw_data.quick_flags = 0;
+        m->rw_data.local_flags = 0;
+        m->rw_data.quick_flags &= ~RW_FPATH_PKT_INCLUDE_L2_HEADER;
+#endif
 	rte_mempool_put(m->pool, m);
 }
 
@@ -1304,7 +1357,6 @@ static inline void rte_pktmbuf_reset(struct rte_mbuf *m)
 	m->vlan_tci_outer = 0;
 	m->nb_segs = 1;
 	m->port = 0xff;
-
 	m->ol_flags = 0;
 	m->packet_type = 0;
 	m->data_off = (RTE_PKTMBUF_HEADROOM <= m->buf_len) ?
@@ -1857,7 +1909,319 @@ static inline int rte_pktmbuf_chain(struct rte_mbuf *head, struct rte_mbuf *tail
  *   the packet.
  */
 void rte_pktmbuf_dump(FILE *f, const struct rte_mbuf *m, unsigned dump_len);
+#ifdef RTE_LIBRW_PIOT
+#include <string.h>
+#define rte_pktmbuf_data(m)   ((char *)(m)->buf_addr + (m)->data_off)
+#define rte_pktmbuf_next(m)   (m)->next
+#define rte_pktmbuf_nsegs(m)  (m)->nb_segs
+#define rte_pktmbuf_inport(m) (m)->port
 
+#define RW_VF_FLAG_MDATA_L3_OFFSET   0x00000001
+#define RW_VF_FLAG_MDATA_VFTTL      0x00000002
+#define RW_VF_FLAG_MDATA_PATHID     0x00000004
+#define RW_VF_FLAG_MDATA_ENCAP_TYPE 0x00000008
+#define RW_VF_FLAG_MDATA_PAYLOAD_TYPE    0x00000010
+#define RW_VF_FLAG_MDATA_LPORTID    0x00000020
+#define RW_VF_FLAG_MDATA_PORTMETA   0x00000040
+#define RW_VF_FLAG_MDATA_NCID       0x00000080
+#define RW_VF_FLAG_MDATA_NH_POLICY  0x00000100
+#define RW_VF_FLAG_MDATA_TRACE_ENA  0x00000400
+#define RW_VF_FLAG_MDATA_ACTION_FLAGS 0x00000800
+#define RW_VF_FLAG_MDATA_TRAFGEN_COHERENCY 0x00001000
+#define RW_VF_FLAG_MDATA_FLOW_CACHE_TARGET 0x00002000
+#define RW_VF_FLAG_MDATA_NH_LPORTID  0x00004000
+#define RW_VF_FLAG_MDATA_LOCAL_FLAGS 0x00008000
+#define RW_VF_FLAG_MDATA_SIGNID 0x00010000
+#define RW_VF_FLAG_MDATA_FLOWID 0x00020000
+#define RW_VF_FLAG_MDATA_VSAPHANDLE 0x00040000
+  
+#define RW_VF_MDATA_FLAG(_m)  ((_m)->rw_data.mdata_flag)
+
+
+#define RW_VF_SET_MDATA_PORT_RX_DATA(_m, _encap, _protocol, _lport, _ncr, _offset) \
+  {                                                                     \
+    (_m)->rw_data.l3_offset = (_offset);                                \
+    (_m)->rw_data.vf_encap  = (_encap);                                 \
+    (_m)->rw_data.payload   = (_protocol);                              \
+    (_m)->rw_data.vf_lportid = (_lport);                                \
+    (_m)->rw_data.vf_ncid    = (_ncr);                                  \
+    (_m)->rw_data.mdata_flag = (RW_VF_FLAG_MDATA_L3_OFFSET | RW_VF_FLAG_MDATA_PAYLOAD_TYPE | RW_VF_FLAG_MDATA_ENCAP_TYPE | RW_VF_FLAG_MDATA_LPORTID | RW_VF_FLAG_MDATA_NCID); \
+  }
+
+  
+#define RW_VF_VALID_MDATA_L3_OFFSET(_m)      ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_L3_OFFSET)
+#define RW_VF_SET_MDATA_L3_OFFSET(_m, _v)    { (_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_L3_OFFSET); (_m)->rw_data.l3_offset = (_v); }
+#define RW_VF_GET_MDATA_L3_OFFSET(_m)        ((_m)->rw_data.l3_offset)
+#define RW_VF_UNSET_MDATA_L3_OFFSET(_m)      ((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_L3_OFFSET))
+
+#define RW_VF_VALID_MDATA_VFTTL(_m)         ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_VFTTL)
+#define RW_VF_SET_MDATA_VFTTL(_m, _v)       { (_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_VFTTL); (_m)->rw_data.vf_ttl = (_v); }
+#define RW_VF_GET_MDATA_VFTTL(_m)           ((_m)->rw_data.vf_ttl)
+#define RW_VF_UNSET_MDATA_VFTTL(_m)         ((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_VFTTL))
+
+#define RW_VF_VALID_MDATA_PATHID(_m)        ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_PATHID)
+#define RW_VF_SET_MDATA_PATHID(_m, _v)      { (_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_PATHID); (_m)->rw_data.vf_pathid = (_v); }
+#define RW_VF_GET_MDATA_PATHID(_m)          ((_m)->rw_data.vf_pathid)
+#define RW_VF_UNSET_MDATA_PATHID(_m)        ((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_PATHID))
+
+#define RW_VF_VALID_MDATA_ENCAP_TYPE(_m)         ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_ENCAP_TYPE)
+#define RW_VF_SET_MDATA_ENCAP_TYPE(_m, _v)       { (_m)->rw_data.mdata_flag |= ( RW_VF_FLAG_MDATA_ENCAP_TYPE); (_m)->rw_data.vf_encap = (_v); }
+#define RW_VF_GET_MDATA_ENCAP_TYPE(_m)           ((_m)->rw_data.vf_encap)
+#define RW_VF_UNSET_MDATA_ENCAP_TYPE(_m)         ((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_ENCAP_TYPE))
+
+#define RW_VF_VALID_MDATA_PAYLOAD_TYPE(_m)      ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_PAYLOAD_TYPE)
+#define RW_VF_SET_MDATA_PAYLOAD_TYPE(_m, _v)    { (_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_PAYLOAD_TYPE); (_m)->rw_data.payload = (_v); }
+#define RW_VF_GET_MDATA_PAYLOAD_TYPE(_m)        ((_m)->rw_data.payload)
+#define RW_VF_UNSET_MDATA_PAYLOAD_TYPE(_m)      ((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_PAYLOAD_TYPE))
+
+#define RW_VF_VALID_MDATA_LPORTID(_m)       ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_LPORTID)
+#define RW_VF_SET_MDATA_LPORTID(_m, _v)     { (_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_LPORTID); (_m)->rw_data.vf_lportid = (_v); }
+#define RW_VF_GET_MDATA_LPORTID(_m)         ((_m)->rw_data.vf_lportid)
+#define RW_VF_UNSET_MDATA_LPORTID(_m)       ((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_LPORTID))
+
+#define RW_VF_VALID_MDATA_PORTMETA(_m)      ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_PORTMETA)
+#define RW_VF_SET_MDATA_PORTMETA(_m, _v)    { (_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_PORTMETA); (_m)->rw_data.vf_portmeta = (_v); }
+#define RW_VF_GET_MDATA_PORTMETA(_m)        ((_m)->rw_data.vf_portmeta)
+#define RW_VF_UNSET_MDATA_PORTMETA(_m)      ((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_PORTMETA))
+
+#define RW_VF_VALID_MDATA_NCID(_m)          ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_NCID)
+#define RW_VF_SET_MDATA_NCID(_m, _v)        { (_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_NCID); (_m)->rw_data.vf_ncid = (_v); }
+#define RW_VF_GET_MDATA_NCID(_m)            ((_m)->rw_data.vf_ncid)
+#define RW_VF_UNSET_MDATA_NCID(_m)          ((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_NCID))
+
+#define RW_VF_VALID_MDATA_SIGNID(_m)          ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_SIGNID)
+#define RW_VF_SET_MDATA_SIGNID(_m, _v)        { (_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_SIGNID); (_m)->rw_data.vf_signid = (_v); }
+#define RW_VF_GET_MDATA_SIGNID(_m)            ((_m)->rw_data.vf_signid)
+#define RW_VF_UNSET_MDATA_SIGNID(_m)          ((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_SIGNID))
+
+#define RW_VF_VALID_MDATA_FLOWID(_m)          ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_FLOWID)
+#define RW_VF_SET_MDATA_FLOWID(_m, _v)        { (_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_FLOWID); (_m)->rw_data.vf_flowid = (_v); }
+#define RW_VF_GET_MDATA_FLOWID(_m)            ((_m)->rw_data.vf_flowid)
+#define RW_VF_UNSET_MDATA_FLOWID(_m)          ((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_FLOWID))
+
+#define RW_VF_VALID_MDATA_VSAPHANDLE(_m)          ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_VSAPHANDLE)
+#define RW_VF_SET_MDATA_VSAPHANDLE(_m, _v)        { (_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_VSAPHANDLE); (_m)->rw_data.vf_vsaphandle = (_v); }
+#define RW_VF_GET_MDATA_VSAPHANDLE(_m)            ((_m)->rw_data.vf_vsaphandle)
+#define RW_VF_UNSET_MDATA_VSAPHANDLE(_m)          ((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_VSAPHANDLE))
+
+
+  
+#define RW_VF_VALID_MDATA_NH_POLICY(_m)     ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_NH_POLICY)
+#define RW_VF_SET_MDATA_NH_POLICY(_m, _v, size)   { (_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_NH_POLICY); \
+    memcpy((_m)->rw_data.vf_nh_policy_fwd, (_v), (size)); }
+#define RW_VF_SET_MDATA_NH_POLICY_ZERO(_m)   { (_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_NH_POLICY); \
+    memset((_m)->rw_data.vf_nh_policy_fwd, 0, sizeof((_m)->rw_data.vf_nh_policy_fwd)); }
+#define RW_VF_GET_MDATA_NH_POLICY(_m)       (&((_m)->rw_data.vf_nh_policy_fwd[0]))
+#define RW_VF_UNSET_MDATA_NH_POLICY(_m)     ((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_NH_POLICY))
+#define RW_VF_VALID_MDATA_NH_LPORTID(_m)     ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_NH_LPORTID)
+#define RW_VF_SET_MDATA_NH_LPORTID(_m, _v)   { (_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_NH_LPORTID); (_m)->rw_data.vf_nh_policy_lportid = (_v); }
+#define RW_VF_GET_MDATA_NH_LPORTID(_m)       (((_m)->rw_data.vf_nh_policy_lportid))
+#define RW_VF_UNSET_MDATA_NH_LPORTID(_m)     ((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_NH_LPORTID))
+
+#define RW_VF_VALID_MDATA_TRACE_ENA(_m)      ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_TRACE_ENA)
+#define RW_VF_SET_MDATA_TRACE_ENA(_m)        ((_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_TRACE_ENA))
+#define RW_VF_UNSET_MDATA_TRACE_ENA(_m)      ((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_TRACE_ENA))
+
+#define RW_VF_VALID_MDATA_ACTION_FLAGS(_m)      ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_ACTION_FLAGS)
+#define RW_VF_SET_MDATA_ACTION_FLAGS(_m, flag)        {((_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_ACTION_FLAGS)); (_m)->rw_data.quick_flags |= (flag); }
+#define RW_VF_GET_MDATA_ACTION_FLAGS(_m)       (((_m)->rw_data.quick_flags))
+#define RW_VF_UNSET_MDATA_ACTION_FLAGS(_m)      {((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_ACTION_FLAGS)); (_m)->rw_data.quick_flags =0;}
+#define RW_VF_UNSET_MDATA_ACTION_FLAG(_m, flag)      {(_m)->rw_data.quick_flags &= (~(flag)); ((_m)->rw_data.quick_flags == 0)?((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_ACTION_FLAGS)):0;}
+#define RW_VF_VALID_MDATA_LOCAL_FLAGS(_m)      ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_LOCAL_FLAGS)
+#define RW_VF_SET_MDATA_LOCAL_FLAGS(_m, flag)        {((_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_LOCAL_FLAGS)); (_m)->rw_data.local_flags |= (flag); }
+#define RW_VF_GET_MDATA_LOCAL_FLAGS(_m)       (((_m)->rw_data.local_flags))
+#define RW_VF_UNSET_MDATA_LOCAL_FLAGS(_m)      {((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_LOCAL_FLAGS)); (_m)->rw_data.local_flags =0;}
+#define RW_VF_UNSET_MDATA_LOCAL_FLAG(_m, flag)      {(_m)->rw_data.local_flags &= (~(flag)); ((_m)->rw_data.local_flags == 0)?((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_LOCAL_FLAGS)):0;}
+
+
+#define RW_VF_VALID_MDATA_TRAFGEN_COHERENCY(_m)      ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_TRAFGEN_COHERENCY)
+#define RW_VF_SET_MDATA_TRAFGEN_COHERENCY(_m, flag)        {((_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_TRAFGEN_COHERENCY)); (_m)->rw_data.trafgen_coherency = (flag); }
+#define RW_VF_GET_MDATA_TRAFGEN_COHERENCY(_m)       (((_m)->rw_data.trafgen_coherency))
+#define RW_VF_UNSET_MDATA_TRAFGEN_COHERENCY(_m)      {((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_TRAFGEN_COHERENCY)); (_m)->rw_data.trafgen_coherency =0;}  
+
+#define RW_VF_VALID_MDATA_FLOW_CACHE_TARGET(_m)         ((_m)->rw_data.mdata_flag & RW_VF_FLAG_MDATA_FLOW_CACHE_TARGET)
+#define RW_VF_SET_MDATA_FLOW_CACHE_TARGET(_m, _v)       { (_m)->rw_data.mdata_flag |= (RW_VF_FLAG_MDATA_FLOW_CACHE_TARGET); (_m)->rw_data.vf_flow_cache_target = (_v); }
+#define RW_VF_GET_MDATA_FLOW_CACHE_TARGET(_m)           ((_m)->rw_data.vf_flow_cache_target)
+#define RW_VF_UNSET_MDATA_FLOW_CACHE_TARGET(_m)         ((_m)->rw_data.mdata_flag &= (~RW_VF_FLAG_MDATA_FLOW_CACHE_TARGET))
+
+static inline void rw_pkt_copy_metadata(struct rte_mbuf *to, const struct rte_mbuf *from){
+  RW_VF_MDATA_FLAG(to) = RW_VF_MDATA_FLAG(from);
+  if (RW_VF_VALID_MDATA_L3_OFFSET(from)){
+    RW_VF_SET_MDATA_L3_OFFSET(to, RW_VF_GET_MDATA_L3_OFFSET(from));
+  }
+  if (RW_VF_VALID_MDATA_VFTTL(from)){
+    RW_VF_SET_MDATA_VFTTL(to, RW_VF_GET_MDATA_VFTTL(from));
+  }
+  if (RW_VF_VALID_MDATA_PATHID(from)){
+    RW_VF_SET_MDATA_PATHID(to, RW_VF_GET_MDATA_PATHID(from));
+  }
+  if (RW_VF_VALID_MDATA_ENCAP_TYPE(from)){
+    RW_VF_SET_MDATA_ENCAP_TYPE(to, RW_VF_GET_MDATA_ENCAP_TYPE(from));
+  }
+  if (RW_VF_VALID_MDATA_PAYLOAD_TYPE(from)){
+    RW_VF_SET_MDATA_PAYLOAD_TYPE(to, RW_VF_GET_MDATA_PAYLOAD_TYPE(from));
+  }
+  if (RW_VF_VALID_MDATA_LPORTID(from)){
+    RW_VF_SET_MDATA_LPORTID(to, RW_VF_GET_MDATA_LPORTID(from));
+  }
+  if (RW_VF_VALID_MDATA_PORTMETA(from)){
+    RW_VF_SET_MDATA_PORTMETA(to, RW_VF_GET_MDATA_PORTMETA(from));
+  }
+  if (RW_VF_VALID_MDATA_NCID(from)){
+    RW_VF_SET_MDATA_NCID(to, RW_VF_GET_MDATA_NCID(from));
+  }
+  if (RW_VF_VALID_MDATA_SIGNID(from)){
+    RW_VF_SET_MDATA_SIGNID(to, RW_VF_GET_MDATA_SIGNID(from));
+  }
+  if (RW_VF_VALID_MDATA_FLOWID(from)){
+    RW_VF_SET_MDATA_FLOWID(to, RW_VF_GET_MDATA_FLOWID(from));
+  }
+  if (RW_VF_VALID_MDATA_VSAPHANDLE(from)){
+    RW_VF_SET_MDATA_VSAPHANDLE(to, RW_VF_GET_MDATA_VSAPHANDLE(from));
+  }
+  if (RW_VF_VALID_MDATA_NH_POLICY(from)){
+    RW_VF_SET_MDATA_NH_POLICY(to, RW_VF_GET_MDATA_NH_POLICY(from), 16);//AKKI
+  }
+  if (RW_VF_VALID_MDATA_NH_LPORTID(from)){
+    RW_VF_SET_MDATA_NH_LPORTID(to, RW_VF_GET_MDATA_NH_LPORTID(from));
+  }
+  if (RW_VF_VALID_MDATA_ACTION_FLAGS(from)){
+    RW_VF_SET_MDATA_ACTION_FLAGS(to,
+                                 RW_VF_GET_MDATA_ACTION_FLAGS(from));
+  }
+  if (RW_VF_VALID_MDATA_LOCAL_FLAGS(from)){
+    RW_VF_SET_MDATA_LOCAL_FLAGS(to,
+                                RW_VF_GET_MDATA_LOCAL_FLAGS(from));
+  }
+  if (RW_VF_VALID_MDATA_FLOW_CACHE_TARGET(from)){
+    RW_VF_SET_MDATA_FLOW_CACHE_TARGET(to, RW_VF_GET_MDATA_FLOW_CACHE_TARGET(from));
+  }
+}
+
+
+
+
+  static inline struct rte_mbuf* rte_pktmbuf_allocate_size(struct rte_mempool *mp, int size){
+  struct rte_mbuf *copy;
+  uint8_t nseg;
+  struct rte_mbuf *mi, **prev;
+  
+  copy = rte_pktmbuf_alloc(mp);
+  
+  if (!copy){
+    return NULL;
+  }
+  nseg = (size/ rte_pktmbuf_tailroom(copy));
+  mi = copy;
+  prev = &mi->next;
+  
+  while (nseg > 0){
+    mi =  rte_pktmbuf_alloc(mp);
+    
+    if (!mi){
+      rte_pktmbuf_free(copy);
+      return NULL;
+    }
+    
+    *prev = mi;
+    prev = &mi->next;
+    copy->nb_segs++;
+    nseg--;
+  }
+  return copy;
+}
+
+static inline struct rte_mbuf* rte_pktmbuf_duplicate(const struct rte_mbuf *m,
+                                                     struct rte_mempool *mp)
+{
+  struct rte_mbuf *mi,*copy = NULL;
+  unsigned char *to, *from;
+  int len, copylen, remlen, next, datalen;
+
+  copy = rte_pktmbuf_allocate_size(mp, rte_pktmbuf_pkt_len(m));
+  
+  if (!copy){
+    return NULL;
+  }
+  
+  copy->pkt_len =rte_pktmbuf_pkt_len(m);
+  mi = copy;
+  //Need the topmost vf data
+  rw_pkt_copy_metadata(mi, m);
+  to = rte_pktmbuf_mtod(mi, unsigned char*);
+  remlen = rte_pktmbuf_tailroom(mi);
+  next = 0;
+  datalen = 0;
+  
+  while(m){
+    len = rte_pktmbuf_data_len(m);
+    from = rte_pktmbuf_mtod(m, unsigned char*);
+    
+    while (len > 0){
+      copylen = len;
+      if (copylen > remlen){
+        copylen = remlen;
+        next = 1;
+      }
+      memcpy(to, from, copylen);
+      to += copylen;
+      from += copylen;
+      len -= copylen;
+      remlen -= copylen;
+      datalen += copylen;
+      if (next){
+        mi->data_len = datalen;
+        mi = mi->next;
+        to = rte_pktmbuf_mtod(mi, unsigned char*);
+        remlen = rte_pktmbuf_tailroom(mi);
+        next = 0;
+        datalen = 0;
+      }
+    }
+    m = m->next;
+  }
+  mi->data_len = datalen;
+  return copy;
+}
+  
+
+  
+static inline struct rte_mbuf* rte_pktmbuf_linearize_self(struct rte_mbuf *m)
+{
+  struct rte_mbuf *copy = NULL;
+  unsigned char *to, *from;
+  int len, remlen;
+  
+  copy = m;
+  m = m->next;
+  
+  to = rte_pktmbuf_mtod(copy, unsigned char*);
+  to += rte_pktmbuf_data_len(copy);
+  remlen = rte_pktmbuf_tailroom(copy);
+  
+  while(m){
+    len = rte_pktmbuf_data_len(m);
+    from = rte_pktmbuf_mtod(m, unsigned char*);
+    RTE_MBUF_ASSERT((len > remlen));
+    memcpy(to, from, len);
+    to += len;
+    remlen -= len;
+    copy->data_len += len;
+    m = m->next;
+  }
+  RTE_MBUF_ASSERT((rte_pktmbuf_data_len(copy) != rte_pktmbuf_pkt_len(copy)));
+  copy->nb_segs = 1;
+  m = copy->next;
+  copy->next = NULL;
+  if (m){
+    rte_pktmbuf_free(m);
+  }
+  
+  return copy;
+}
+
+#endif
+  
 #ifdef __cplusplus
 }
 #endif

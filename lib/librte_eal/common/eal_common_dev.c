@@ -150,3 +150,32 @@ rte_eal_vdev_uninit(const char *name)
 	RTE_LOG(ERR, EAL, "no driver found for %s\n", name);
 	return -EINVAL;
 }
+#ifdef RTE_LIBRW_PIOT
+struct rte_driver* rte_eal_find_driver(const char *name)
+{
+  struct rte_driver *driver;
+  
+  TAILQ_FOREACH(driver, &dev_driver_list, next) {
+    if ((driver->name) && !strcmp(driver->name, name)){
+      return driver;
+    }
+  }
+  return NULL;
+}
+
+int
+rte_eal_non_pci_ethdev_init_by_devname(const char *drivername,
+                                       const char *devname,
+                                       const char *param)
+{
+  struct rte_driver *driver;
+  int rc = -1;
+  
+  driver = rte_eal_find_driver(drivername);
+  if (driver){
+    return driver->init(devname, param);
+  }
+
+  return rc;
+}
+#endif

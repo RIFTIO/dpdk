@@ -930,7 +930,11 @@ test_failing_mbuf_sanity_check(void)
 static int
 test_mbuf(void)
 {
-	RTE_BUILD_BUG_ON(sizeof(struct rte_mbuf) != RTE_CACHE_LINE_SIZE * 2);
+#ifdef RTE_LIBRW_PIOT
+  RTE_BUILD_BUG_ON(sizeof(struct rte_mbuf) != RTE_CACHE_LINE_SIZE * 3);
+#else
+  RTE_BUILD_BUG_ON(sizeof(struct rte_mbuf) != RTE_CACHE_LINE_SIZE * 2);
+#endif
 
 	/* create pktmbuf pool if it does not exist */
 	if (pktmbuf_pool == NULL) {

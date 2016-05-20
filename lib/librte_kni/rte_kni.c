@@ -60,7 +60,7 @@
 #define KNI_REQUEST_MBUF_NUM_MAX      32
 
 #define KNI_MEM_CHECK(cond) do { if (cond) goto kni_fail; } while (0)
-
+#ifndef RTE_LIBRW_PIOT
 /**
  * KNI context
  */
@@ -84,6 +84,7 @@ struct rte_kni {
 	struct rte_kni_ops ops;             /**< operations for request */
 	uint8_t in_use : 1;                 /**< kni in use */
 };
+#endif
 
 enum kni_ops_status {
 	KNI_REQ_NO_REGISTER = 0,
@@ -219,7 +220,11 @@ rte_kni_init(unsigned int max_kni_ifaces)
 		if (kni_fd < 0)
 			rte_panic("Can not open /dev/%s\n", KNI_DEVICE);
 	}
-
+#ifdef RTE_LIBRW_PIOT
+        else{
+          return;
+        }
+#endif
 	/* Allocate slot objects */
 	kni_memzone_pool.slots = (struct rte_kni_memzone_slot *)
 					rte_malloc(NULL,
@@ -275,7 +280,7 @@ rte_kni_init(unsigned int max_kni_ifaces)
 							SOCKET_ID_ANY, 0);
 		KNI_MEM_CHECK(mz == NULL);
 		it->m_free_q = mz;
-
+#ifndef RTE_LIBRW_PIOT
 		/* Request RING */
 		snprintf(obj_name, OBJNAMSIZ, "kni_req_%d", i);
 		mz = kni_memzone_reserve(obj_name, KNI_FIFO_SIZE,
@@ -296,7 +301,7 @@ rte_kni_init(unsigned int max_kni_ifaces)
 							SOCKET_ID_ANY, 0);
 		KNI_MEM_CHECK(mz == NULL);
 		it->m_sync_addr = mz;
-
+#endif
 		if ((i+1) == max_kni_ifaces) {
 			it->next = NULL;
 			kni_memzone_pool.free_tail = it;
@@ -364,7 +369,25 @@ rte_kni_alloc(struct rte_mempool *pktmbuf_pool,
 	dev_info.force_bind = conf->force_bind;
 	dev_info.group_id = conf->group_id;
 	dev_info.mbuf_size = conf->mbuf_size;
-
+#ifdef RTE_LIBRW_PIOT
+        dev_info.no_data = conf->no_data;
+        dev_info.no_pci     = conf->no_pci;
+        dev_info.ifindex    = conf->ifindex;
+        dev_info.always_up  = conf->always_up;
+        dev_info.no_tx  = conf->no_tx;
+        dev_info.loopback = conf->loopback;
+        dev_info.no_user_ring = conf->no_user_ring;
+        dev_info.mtu = conf->mtu;
+        dev_info.vlanid = conf->vlanid;
+        memcpy(dev_info.mac, conf->mac, 6);
+        strncpy(dev_info.netns_name, conf->netns_name, sizeof(dev_info.netns_name));
+        dev_info.netns_fd = conf->netns_fd;
+        dev_info.pid      = getpid();
+#ifdef RTE_LIBRW_NOHUGE
+        dev_info.nohuge = conf->nohuge;
+        dev_info.nl_pid = conf->nl_pid;
+#endif
+#endif
 	snprintf(ctx->name, RTE_KNI_NAMESIZE, "%s", intf_name);
 	snprintf(dev_info.name, RTE_KNI_NAMESIZE, "%s", intf_name);
 
@@ -394,7 +417,7 @@ rte_kni_alloc(struct rte_mempool *pktmbuf_pool,
 	ctx->free_q = mz->addr;
 	kni_fifo_init(ctx->free_q, KNI_FIFO_COUNT_MAX);
 	dev_info.free_phys = mz->phys_addr;
-
+#ifndef RTE_LIBRW_PIOT
 	/* Request RING */
 	mz = slot->m_req_q;
 	ctx->req_q = mz->addr;
@@ -412,7 +435,7 @@ rte_kni_alloc(struct rte_mempool *pktmbuf_pool,
 	ctx->sync_addr = mz->addr;
 	dev_info.sync_va = mz->addr;
 	dev_info.sync_phys = mz->phys_addr;
-
+#endif
 
 	/* MBUF mempool */
 	snprintf(mz_name, sizeof(mz_name), RTE_MEMPOOL_OBJ_NAME,
@@ -500,7 +523,12 @@ rte_kni_handle_request(struct rte_kni *kni)
 
 	if (kni == NULL)
 		return -1;
-
+#ifdef RTE_LIBRW_PIOT
+        /*If there is a case where the kni interface is unidirectional. then the
+          free-q will never get freed. Hence calling it here*/
+        if (!kni_fifo_empty(kni->free_q)) 
+          kni_free_mbufs(kni);
+#endif
 	/* Get request mbuf */
 	ret = kni_fifo_get(kni->req_q, (void **)&req, 1);
 	if (ret != 1)
@@ -542,7 +570,10 @@ unsigned
 rte_kni_tx_burst(struct rte_kni *kni, struct rte_mbuf **mbufs, unsigned num)
 {
 	unsigned ret = kni_fifo_put(kni->rx_q, (void **)mbufs, num);
-
+#ifdef RTE_LIBRW_PIOT
+        /* try allocating buffer only if the fifo is not full */
+        if (ret)
+#endif
 	/* Get mbufs from free_q and then free them */
 	kni_free_mbufs(kni);
 
@@ -710,3 +741,74 @@ rte_kni_close(void)
 	close(kni_fd);
 	kni_fd = -1;
 }
+
+
+#ifdef RTE_LIBRW_PIOT
+int rte_kni_fifo_get(void *fifo, void **mbufs, int num){
+  return kni_fifo_get((struct rte_kni_fifo *)fifo, mbufs, num);
+}
+
+int rte_kni_fifo_put(void *fifo, void **mbufs, int num){
+  return kni_fifo_put((struct rte_kni_fifo *)fifo, mbufs, num);
+}
+
+int
+rte_kni_clear_packet_counters(void)
+{
+  if (kni_fd <= 0){
+    return 0;
+  }
+  
+  if ((ioctl(kni_fd, RTE_KNI_IOCTL_CLEAR_PACKET_COUNTERS, NULL))< 0){
+    RTE_LOG(ERR, KNI, "Fail to clear counters\n");
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * This function called by piot will make an ioctl to the kernel to get the socket
+ * filters if any
+ * @param[in]  kni  - kni instance
+ * @param[in]  inode-id - inode-id of the AF_PACKET socket
+ * @param[in]  skt - socket pointer for verification
+ * @param[out] len - number of filters
+ * @param[out ] filter - the actual filters
+ *
+ * @returns 0  if success
+ * @returns -1 if error
+ */
+int
+rte_kni_get_packet_socket_info(struct rte_kni *kni, uint32_t inode_id,
+                               void *skt,
+                               unsigned short *len, 
+                               struct sock_filter *skt_filter)
+{
+  	struct rte_kni_packet_socket_info ioctl_info;
+       
+        if (*len < BPF_MAXINSNS){
+                return -1;
+        }
+
+        memset(&ioctl_info, 0, sizeof(ioctl_info));
+        ioctl_info.inode_id = inode_id;
+        ioctl_info.skt = skt;
+        ioctl_info.len = *len;
+	if ((ioctl(kni_fd, RTE_KNI_IOCTL_GET_PACKET_SOCKET_INFO, &ioctl_info))< 0){
+          if (!kni){
+            RTE_LOG(ERR, KNI, "Fail to get socket filter informartion distributed\n");
+          }else{
+            RTE_LOG(ERR, KNI, "Fail to get socket filter informartion\n");
+          }
+          *len = 0;
+          return -1;
+	}
+        *len = (unsigned short)ioctl_info.len;
+        if (*len > 0)
+          /*Now that we have the bpf filter, copy it*/
+          memcpy(skt_filter, &ioctl_info.filter, 
+                 sizeof(struct sock_filter) * (*len));
+        
+	return 0;
+}
+#endif

@@ -85,6 +85,7 @@
 struct pci_driver_list pci_driver_list;
 struct pci_device_list pci_device_list;
 
+
 static struct rte_devargs *pci_devargs_lookup(struct rte_pci_device *dev)
 {
 	struct rte_devargs *devargs;
@@ -192,10 +193,35 @@ rte_eal_pci_probe_one_driver(struct rte_pci_driver *dr, struct rte_pci_device *d
 			if (ret != 0)
 				return ret;
 		} else if (dr->drv_flags & RTE_PCI_DRV_FORCE_UNBIND &&
-				rte_eal_process_type() == RTE_PROC_PRIMARY) {
-			/* unbind current driver */
+                           rte_eal_process_type() == RTE_PROC_PRIMARY) {
+#if defined (RTE_EAL_UNBIND_PORTS) && defined(RTE_LIBRW_PIOT)
+                  {
+                    const char *module_name = NULL;
+
+                    module_name = pci_get_pmd_driver_name(dr);//IGB_UIO_NAME;
+                    module_name = "igb_uio";
+                    if (pci_uio_check_module(module_name) != 0){
+                      rte_exit(EXIT_FAILURE, "The %s module is required by the "
+                               "%s driver\n", module_name, dr->name);
+                    }
+                    
+                    /* unbind current driver, bind ours */
+                    if (pci_unbind_kernel_driver(dev) < 0)
+                      return -1;
+                    
+                    if (pci_pmd_bind_device(dev, module_name) < 0)
+                      return -1;
+                    
+                    /* map resources for devices that use igb_uio */
+                    ret = pci_map_device(dev);
+                    if (ret != 0)
+                      return ret;
+                  }
+#else
+                  /* unbind current driver */
 			if (pci_unbind_kernel_driver(dev) < 0)
 				return -1;
+#endif
 		}
 
 		/* reference driver structure */
@@ -268,7 +294,7 @@ rte_eal_pci_detach_dev(struct rte_pci_driver *dr,
  * registered driver for the given device. Return -1 if initialization
  * failed, return 1 if no driver is found for this device.
  */
-static int
+int
 pci_probe_all_drivers(struct rte_pci_device *dev)
 {
 	struct rte_pci_driver *dr = NULL;

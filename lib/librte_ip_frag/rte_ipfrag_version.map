@@ -8,6 +8,9 @@ DPDK_2.0 {
 	rte_ipv4_fragment_packet;
 	rte_ipv6_frag_reassemble_packet;
 	rte_ipv6_fragment_packet;
+        rte_ipv6_fragment_packet_flat;
+        rte_ip_delete_stale_fragments;
+        rte_ipv4_fragment_packet_flat;
 
 	local: *;
 };

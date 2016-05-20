@@ -852,6 +852,9 @@ struct rte_eth_dev_info {
 	uint16_t vmdq_pool_base;  /**< First ID of VMDQ pools. */
 	struct rte_eth_desc_lim rx_desc_lim;  /**< RX descriptors limits */
 	struct rte_eth_desc_lim tx_desc_lim;  /**< TX descriptors limits */
+#ifdef  RTE_LIBRW_PIOT
+  uint32_t    interrupt_handle; /**< In case of raw, it is the fd value*/
+#endif
 };
 
 /**
@@ -3886,7 +3889,11 @@ const struct rte_memzone *
 rte_eth_dma_zone_reserve(const struct rte_eth_dev *eth_dev, const char *name,
 			 uint16_t queue_id, size_t size,
 			 unsigned align, int socket_id);
-
+#ifdef RTE_LIBRW_PIOT
+  
+struct rte_eth_dev * rte_eth_dev_find_dev_by_pci(struct rte_pci_device *pci_dev);
+struct rte_eth_dev * rte_eth_dev_get_last_eth_dev(void);
+#endif
 #ifdef __cplusplus
 }
 #endif

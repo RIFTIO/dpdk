@@ -36,20 +36,26 @@
 # $1 and $2 MUST be absolute paths
 #
 
+##
+# This rather too complex, perhaps should consider
+#  python -c "import os.path; print os.path.relpath('/foo/bar', '/foo/baz/foo')"
+##
+
 if [ $# -ne 2 ]; then
 	echo "Bad arguments"
 	echo "Usage:"
 	echo "  $0 path1 path2"
 	exit 1
 fi
+# get the realpath after expanding symlinks
+TEMP1=`realpath $1`
+TEMP2=`realpath $2`
 
-# get the real absolute path, derefencing symlinks
-ABS1=$(readlink -f $1)
-ABS2=$(readlink -f $2)
+REL1=${TEMP1#/}
+REL2=${TEMP2#/}
 
-# remove leading slash
-REL1=${ABS1#/}
-REL2=${ABS2#/}
+REL1=${REL1//\/\//\/}
+REL2=${REL2//\/\//\/}
 
 left1=${REL1%%/*}
 right1=${REL1#*/}
@@ -60,15 +66,14 @@ left2=${REL2%%/*}
 right2=${REL2#*/}
 prev_right2=$REL2
 prev_left2=
-
-prefix=
+differ_at_root=1
 
 while [ "${right1}" != "" -a "${right2}" != "" ]; do
 
 	if [ "$left1" != "$left2" ]; then
 		break
 	fi
-
+        differ_at_root=0
 	prev_left1=$left1
 	left1=$left1/${right1%%/*}
 	prev_right1=$right1
@@ -100,6 +105,11 @@ while [ "${right2}" != "" ]; do
 	fi
 done
 
-echo ${prefix}${right1}
+if [ "${differ_at_root}" == 1 ]; then      
+        echo "/${prefix}${right1}"
+else
+        echo ${prefix}${right1}
+fi
+
 
 exit 0

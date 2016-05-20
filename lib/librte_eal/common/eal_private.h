@@ -174,7 +174,17 @@ int pci_unbind_kernel_driver(struct rte_pci_device *dev);
  *   is found for the device.
  */
 int pci_map_device(struct rte_pci_device *dev);
-
+#ifdef RTE_LIBRW_PIOT
+struct rte_pci_device *
+rte_eal_pci_probe_by_pci_addr(const char *buff);
+int
+pci_pmd_bind_device(struct rte_pci_device *dev, const char *module_name);
+int
+pci_uio_check_module(const char *module_name);
+char* pci_get_pmd_driver_name(struct rte_pci_driver *dr);
+int
+pci_bind_device(struct rte_pci_device *dev, char dr_path[]);
+#endif
 /**
  * Unmap this device
  *

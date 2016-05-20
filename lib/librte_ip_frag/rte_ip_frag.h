@@ -110,6 +110,11 @@ struct ip_frag_tbl_stat {
 	uint64_t reuse_num;     /**< # of reuse (del/add) ops. */
 	uint64_t fail_total;    /**< total # of add failures. */
 	uint64_t fail_nospace;  /**< # of 'no space' add failures. */
+#ifdef RTE_LIBRW_PIOT
+        uint64_t invalid_fragments;
+        uint64_t ooo_fragments;
+        uint64_t explicit_stale;
+#endif
 } __rte_cache_aligned;
 
 /** fragmentation table */
@@ -341,7 +346,12 @@ rte_ipv4_frag_pkt_is_fragmented(const struct ipv4_hdr * hdr) {
  * @param prefetch
  *   How many buffers to prefetch before freeing.
  */
-void rte_ip_frag_free_death_row(struct rte_ip_frag_death_row *dr,
+#ifdef RTE_LIBRW_PIOT
+int
+#else
+void
+#endif
+rte_ip_frag_free_death_row(struct rte_ip_frag_death_row *dr,
 		uint32_t prefetch);
 
 
@@ -355,7 +365,21 @@ void rte_ip_frag_free_death_row(struct rte_ip_frag_death_row *dr,
  */
 void
 rte_ip_frag_table_statistics_dump(FILE * f, const struct rte_ip_frag_tbl *tbl);
-
+#ifdef RTE_LIBRW_PIOT
+int32_t rte_ipv4_fragment_packet_flat(struct rte_mbuf *pkt_in,
+                                      struct rte_mbuf **pkts_out,
+                                      uint16_t nb_pkts_out, uint16_t mtu_size,
+                                      struct rte_mempool *pool_direct,
+                                      struct rte_mbuf* (*alloc_func)(struct rte_mempool *));
+int32_t rte_ipv6_fragment_packet_flat(struct rte_mbuf *pkt_in,
+                                      struct rte_mbuf **pkts_out,
+                                      uint16_t nb_pkts_out, uint16_t mtu_size,
+                                      struct rte_mempool *pool_direct,
+                                      struct rte_mbuf* (*alloc_func)(struct rte_mempool *));
+int
+rte_ip_delete_stale_fragments(struct rte_ip_frag_tbl *frag,
+                              struct rte_ip_frag_death_row *dr, uint64_t tms);
+#endif
 #ifdef __cplusplus
 }
 #endif

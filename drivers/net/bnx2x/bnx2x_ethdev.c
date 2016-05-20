@@ -500,7 +500,11 @@ static struct eth_driver rte_bnx2x_pmd = {
 	.pci_drv = {
 		.name = "rte_bnx2x_pmd",
 		.id_table = pci_id_bnx2x_map,
+#if defined (RTE_EAL_UNBIND_PORTS) && defined(RTE_LIBRW_PIOT)
+                .drv_flags = RTE_PCI_DRV_FORCE_UNBIND | RTE_PCI_DRV_INTR_LSC,
+#else
 		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_INTR_LSC,
+#endif
 	},
 	.eth_dev_init = eth_bnx2x_dev_init,
 	.dev_private_size = sizeof(struct bnx2x_softc),

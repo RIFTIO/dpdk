@@ -1122,8 +1122,11 @@ static int virtio_resource_init_by_uio(struct rte_pci_device *pci_dev)
 	}
 
 	pci_dev->intr_handle.type = RTE_INTR_HANDLE_UIO;
+#ifdef RTE_LIBRW_PIOT
+        // JIRA-6822 - vhost-user created virtio does not support LSC
+#else
 	pci_dev->driver->drv_flags |= RTE_PCI_DRV_INTR_LSC;
-
+#endif
 	return 0;
 }
 
@@ -1438,7 +1441,12 @@ static struct eth_driver rte_virtio_pmd = {
 	.pci_drv = {
 		.name = "rte_virtio_pmd",
 		.id_table = pci_id_virtio_map,
-		.drv_flags = RTE_PCI_DRV_DETACHABLE,
+		.drv_flags =
+#if defined (RTE_EAL_UNBIND_PORTS) && defined(RTE_LIBRW_PIOT)
+                RTE_PCI_DRV_FORCE_UNBIND,
+#else
+                RTE_PCI_DRV_DETACHABLE,
+#endif
 	},
 	.eth_dev_init = eth_virtio_dev_init,
 	.eth_dev_uninit = eth_virtio_dev_uninit,

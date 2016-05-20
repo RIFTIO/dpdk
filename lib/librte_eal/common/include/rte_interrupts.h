@@ -113,6 +113,10 @@ int rte_intr_enable(struct rte_intr_handle *intr_handle);
  */
 int rte_intr_disable(struct rte_intr_handle *intr_handle);
 
+#ifdef RTE_LIBRW_PIOT
+void * eal_intr_thread_main(void *arg);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

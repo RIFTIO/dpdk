@@ -1400,6 +1400,36 @@ ssize_t rte_mempool_xmem_usage(void *vaddr, uint32_t elt_num, size_t elt_sz,
  */
 void rte_mempool_walk(void (*func)(const struct rte_mempool *, void *arg),
 		      void *arg);
+#ifdef RTE_LIBRW_PIOT
+  TAILQ_HEAD(rte_mempool_list, rte_tailq_entry);
+  extern struct rte_tailq_elem rte_mempool_tailq;
+
+/*
+ * Flush any cache allocated for this mp in the current 
+ * lcore-id
+ */
+static inline void __attribute__((always_inline))
+rte_mempool_flush_cache(struct rte_mempool *mp)
+{
+#if RTE_MEMPOOL_CACHE_MAX_SIZE > 0
+	struct rte_mempool_cache *cache;
+	unsigned lcore_id = rte_lcore_id();
+#endif /* RTE_MEMPOOL_CACHE_MAX_SIZE > 0 */
+  if (!mp) {
+    return;
+  }
+
+#if RTE_MEMPOOL_CACHE_MAX_SIZE > 0
+	cache = &mp->local_cache[lcore_id];
+
+	if (cache->len > 0) {
+		rte_ring_mp_enqueue_bulk(mp->ring, &cache->objs[0], cache->len);
+		cache->len = 0;
+	}
+#endif /* RTE_MEMPOOL_CACHE_MAX_SIZE > 0 */
+	return;
+}
+#endif /* RTE_LIBRW_PIOT */
 
 #ifdef __cplusplus
 }

@@ -68,7 +68,10 @@ extern "C" {
 struct cmdline *cmdline_file_new(cmdline_parse_ctx_t *ctx, const char *prompt, const char *path);
 struct cmdline *cmdline_stdin_new(cmdline_parse_ctx_t *ctx, const char *prompt);
 void cmdline_stdin_exit(struct cmdline *cl);
-
+#ifdef  RTE_LIBRW_PIOT
+struct cmdline *
+cmdline_term_new(cmdline_parse_ctx_t *ctx, const char *prompt, char *ptyname);
+#endif
 #ifdef __cplusplus
 }
 #endif

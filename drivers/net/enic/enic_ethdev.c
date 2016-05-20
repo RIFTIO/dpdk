@@ -624,7 +624,11 @@ static struct eth_driver rte_enic_pmd = {
 	.pci_drv = {
 		.name = "rte_enic_pmd",
 		.id_table = pci_id_enic_map,
+#if defined (RTE_EAL_UNBIND_PORTS) && defined (RTE_LIBRW_PIOT)
+                .drv_flags = RTE_PCI_DRV_INTR_LSC | RTE_PCI_DRV_FORCE_UNBIND,
+#else
 		.drv_flags = RTE_PCI_DRV_NEED_MAPPING,
+#endif
 	},
 	.eth_dev_init = eth_enicpmd_dev_init,
 	.dev_private_size = sizeof(struct enic),

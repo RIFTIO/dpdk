@@ -96,7 +96,22 @@ get_num_hugepages(const char *subdir)
 	 * anyway ... */
 	if (num_pages > UINT32_MAX)
 		num_pages = UINT32_MAX;
-
+        /*
+#ifdef RTE_LIBRW_PIOT
+{
+          long unsigned resv_pages = 0;
+          snprintf(path, sizeof(path), "%s/%s/resv_hugepages", sys_dir_path, subdir);
+	  if (eal_parse_sysfs_value(path, &resv_pages) == 0) {
+            if (resv_pages > num_pages) {
+              num_pages = 0;
+            }
+            else {
+              num_pages = num_pages - resv_pages;
+            }
+          }
+        }
+#endif
+        */
 	return num_pages;
 }
 

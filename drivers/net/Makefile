@@ -51,6 +51,9 @@ DIRS-$(CONFIG_RTE_LIBRTE_PMD_SZEDATA2) += szedata2
 DIRS-$(CONFIG_RTE_LIBRTE_VIRTIO_PMD) += virtio
 DIRS-$(CONFIG_RTE_LIBRTE_VMXNET3_PMD) += vmxnet3
 DIRS-$(CONFIG_RTE_LIBRTE_PMD_XENVIRT) += xenvirt
+DIRS-$(CONFIG_RTE_LIBRW_PMD_RAW) += rw_raw
+DIRS-$(CONFIG_RTE_LIBRW_PMD_SIM) += rw_sim
+DIRS-$(CONFIG_RTE_LIBRW_PMD_TUN) += rw_tun
 
 include $(RTE_SDK)/mk/rte.sharelib.mk
 include $(RTE_SDK)/mk/rte.subdir.mk

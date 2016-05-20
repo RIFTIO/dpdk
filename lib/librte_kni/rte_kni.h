@@ -89,6 +89,25 @@ struct rte_kni_conf {
 	struct rte_pci_id id;
 
 	uint8_t force_bind : 1; /* Flag to bind kernel thread */
+#ifdef RTE_LIBRW_PIOT
+  	uint8_t no_data : 1; /* Flag to indicate no ethtool support*/
+        uint8_t no_pci : 1;     /* Flag to indicate that there is no pci*/
+        uint8_t no_tx : 1;     /* Flag to indicate that there is no pci*/
+        uint8_t always_up: 1;
+        uint8_t loopback:1;
+        uint8_t no_user_ring:1;
+        uint32_t ifindex;       /* ifindex to be used by the kerenl when creating netdevice*/
+        uint16_t mtu;
+        uint16_t vlanid;
+        char     mac[6];
+        char     netns_name[64];
+        int      netns_fd;
+        int      pid;
+#ifdef RTE_LIBRW_NOHUGE
+  uint8_t nohuge;
+  uint32_t nl_pid;
+#endif
+#endif
 };
 
 /**
@@ -250,7 +269,51 @@ extern int rte_kni_unregister_handlers(struct rte_kni *kni);
  *  Close KNI device.
  */
 extern void rte_kni_close(void);
+#ifdef RTE_LIBRW_PIOT
+/**
+ * This function called by piot will make an ioctl to the kernel to get the socket
+ * filters if any
+ * @param[in]  kni  - kni instance
+ * @param[in]  inode-id - inode-id of the AF_PACKET socket
+ * @param[in]  skt - socket pointer for verification
+ * @param[out] len - number of filters
+ * @param[out ] filter - the actual filters
+ *
+ * @returns 0  if success
+ * @returns -1 if error
+ */
+extern int rte_kni_get_packet_socket_info(struct rte_kni *kni, uint32_t inode_id,
+                                          void *skt, unsigned short *len,
+                                          struct sock_filter *skt_filter);
+  extern int rte_kni_fifo_get(void *fifo, void **mbufs, int num);
+  extern int rte_kni_fifo_put(void *fifo, void **mbufs, int num);
+  extern int
+rte_kni_clear_packet_counters(void);
 
+/**
+ * KNI context
+ */
+struct rte_kni {
+	char name[RTE_KNI_NAMESIZE];        /**< KNI interface name */
+	uint16_t group_id;                  /**< Group ID of KNI devices */
+	uint32_t slot_id;                   /**< KNI pool slot ID */
+	struct rte_mempool *pktmbuf_pool;   /**< pkt mbuf mempool */
+	unsigned mbuf_size;                 /**< mbuf size */
+
+	struct rte_kni_fifo *tx_q;          /**< TX queue */
+	struct rte_kni_fifo *rx_q;          /**< RX queue */
+	struct rte_kni_fifo *alloc_q;       /**< Allocated mbufs queue */
+	struct rte_kni_fifo *free_q;        /**< To be freed mbufs queue */
+
+	/* For request & response */
+	struct rte_kni_fifo *req_q;         /**< Request queue */
+	struct rte_kni_fifo *resp_q;        /**< Response queue */
+	void * sync_addr;                   /**< Req/Resp Mem address */
+
+	struct rte_kni_ops ops;             /**< operations for request */
+	uint8_t in_use : 1;                 /**< kni in use */
+};
+#endif
 #ifdef __cplusplus
 }
 #endif

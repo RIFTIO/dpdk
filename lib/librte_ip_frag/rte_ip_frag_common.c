@@ -41,8 +41,48 @@
 
 #define	IP_FRAG_HASH_FNUM	2
 
+#ifdef RTE_LIBRW_PIOT
+int
+rte_ip_delete_stale_fragments(struct rte_ip_frag_tbl *tbl,
+                              struct rte_ip_frag_death_row *dr, uint64_t tms)
+{
+  struct ip_frag_pkt *pkt, *iter;
+  int count = 0;
+  
+  pkt = TAILQ_FIRST(&tbl->lru);
+  while(pkt){
+    iter = (struct ip_frag_pkt *)(TAILQ_NEXT(pkt, lru));
+    
+    if (tbl->max_cycles + pkt->start < tms){
+      //ip_frag_tbl_del
+      {
+        ip_frag_free(pkt, dr);
+        ip_frag_key_invalidate(&pkt->key);
+        TAILQ_REMOVE(&tbl->lru, pkt, lru);
+        tbl->use_entries--;
+        tbl->stat.del_num++;
+        tbl->stat.explicit_stale++;
+      }
+      if (((dr)->cnt) >= (IP_FRAG_DEATH_ROW_LEN * (IP_MAX_FRAG_NUM + 1))){
+        rte_ip_frag_free_death_row(dr, 3); //AKKI
+      }
+      count++;
+    }else{
+      break;
+    }
+    pkt = iter;
+  }
+  if ((dr)->cnt){
+    rte_ip_frag_free_death_row(dr, 3); //AKKI
+  }
+  return count;
+}
+    
 /* free mbufs from death row */
+int
+#else
 void
+#endif
 rte_ip_frag_free_death_row(struct rte_ip_frag_death_row *dr,
 		uint32_t prefetch)
 {
@@ -63,6 +103,9 @@ rte_ip_frag_free_death_row(struct rte_ip_frag_death_row *dr,
 		rte_pktmbuf_free(dr->row[i]);
 
 	dr->cnt = 0;
+#ifdef RTE_LIBRW_PIOT
+        return n;
+#endif
 }
 
 /* create fragmentation table */

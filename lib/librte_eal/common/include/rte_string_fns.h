@@ -43,7 +43,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
+#ifdef RTE_LIBRW_PIOT
+#define rte_snprintf snprintf
+#endif
 /**
  * Takes string "string" parameter and splits it at character "delim"
  * up to maxtokens-1 times - to give "maxtokens" resulting tokens. Like

@@ -14,6 +14,6 @@ DPDK_2.0 {
 	rte_mempool_xmem_create;
 	rte_mempool_xmem_size;
 	rte_mempool_xmem_usage;
-
+        rte_mempool_tailq;
 	local: *;
 };

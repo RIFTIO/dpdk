@@ -1431,7 +1431,13 @@ static struct eth_driver rte_ixgbe_pmd = {
 	.pci_drv = {
 		.name = "rte_ixgbe_pmd",
 		.id_table = pci_id_ixgbe_map,
-		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_INTR_LSC |
+		.drv_flags =
+#if defined (RTE_EAL_UNBIND_PORTS) && defined(RTE_LIBRW_PIOT)
+                RTE_PCI_DRV_FORCE_UNBIND
+#else
+                RTE_PCI_DRV_NEED_MAPPING
+#endif
+                | RTE_PCI_DRV_INTR_LSC |
 			RTE_PCI_DRV_DETACHABLE,
 	},
 	.eth_dev_init = eth_ixgbe_dev_init,
@@ -1446,7 +1452,13 @@ static struct eth_driver rte_ixgbevf_pmd = {
 	.pci_drv = {
 		.name = "rte_ixgbevf_pmd",
 		.id_table = pci_id_ixgbevf_map,
-		.drv_flags = RTE_PCI_DRV_NEED_MAPPING | RTE_PCI_DRV_DETACHABLE,
+		.drv_flags =
+#if defined (RTE_EAL_UNBIND_PORTS) && defined(RTE_LIBRW_PIOT)
+                RTE_PCI_DRV_FORCE_UNBIND
+#else
+                RTE_PCI_DRV_NEED_MAPPING
+#endif
+                | RTE_PCI_DRV_DETACHABLE,
 	},
 	.eth_dev_init = eth_ixgbevf_dev_init,
 	.eth_dev_uninit = eth_ixgbevf_dev_uninit,

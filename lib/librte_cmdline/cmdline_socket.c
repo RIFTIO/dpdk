@@ -97,7 +97,11 @@ cmdline_stdin_new(cmdline_parse_ctx_t *ctx, const char *prompt)
 
 	tcgetattr(0, &oldterm);
 	memcpy(&term, &oldterm, sizeof(term));
+#ifdef  RTE_LIBRW_PIOT
+	term.c_lflag &= ~(ICANON | ECHO);  /* To have GDB ctrl-c stop */
+#else
 	term.c_lflag &= ~(ICANON | ECHO | ISIG);
+#endif
 	tcsetattr(0, TCSANOW, &term);
 	setbuf(stdin, NULL);
 
@@ -117,3 +121,38 @@ cmdline_stdin_exit(struct cmdline *cl)
 
 	tcsetattr(fileno(stdin), TCSANOW, &cl->oldterm);
 }
+#ifdef  RTE_LIBRW_PIOT
+
+struct cmdline *
+cmdline_term_new(cmdline_parse_ctx_t *ctx, const char *prompt, char *ptyname)
+{
+        int fd;
+        struct cmdline *cl;
+
+
+        fd = open(ptyname, O_RDWR);
+
+        if (fd > 0) {
+          cl = cmdline_new(ctx, prompt, fd, fd);
+#ifdef RTE_EXEC_ENV_LINUXAPP
+        {
+
+        struct termios oldterm, term;
+
+        tcgetattr(fd, &oldterm);
+        memcpy(&term, &oldterm, sizeof(term));
+//      term.c_lflag &= ~(ICANON | ECHO | ISIG);
+//        term.c_lflag &= ~(ICANON | ECHO);  /* To have GDB ctrl-c stop */
+//        tcsetattr(fd, TCSANOW, &term);
+        if (cl)
+          memcpy(&cl->oldterm, &oldterm, sizeof(term));
+       }
+#endif
+          return cl;
+       }
+       else {
+         return NULL;
+       }
+}
+
+#endif

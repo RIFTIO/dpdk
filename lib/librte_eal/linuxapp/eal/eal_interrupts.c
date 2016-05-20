@@ -124,9 +124,11 @@ static union intr_pipefds intr_pipe;
 
 /* interrupt sources list */
 static struct rte_intr_source_list intr_sources;
-
+#ifdef RTE_LIBRW_PIOT
+#else
 /* interrupt handling thread */
 static pthread_t intr_thread;
+#endif
 
 /* VFIO interrupts */
 #ifdef VFIO_PRESENT
@@ -748,7 +750,124 @@ eal_intr_process_interrupts(struct epoll_event *events, int nfds)
 
 	return 0;
 }
+#ifdef RTE_LIBRW_PIOT
 
+/**
+ * It handles all the interrupts.
+ *
+ * @param pfd
+ *  epoll file descriptor.
+ * @param totalfds
+ *  The number of file descriptors added in epoll.
+ *
+ * @return
+ *  int
+ */
+static int
+eal_intr_handle_interrupts(int pfd, unsigned totalfds)
+{
+	struct epoll_event events[totalfds];
+	int nfds = 0;
+
+		nfds = epoll_wait(pfd, events, totalfds, 0);
+		/* epoll_wait fail */
+		if (nfds < 0) {
+			if (errno == EINTR)
+				return 0;
+			RTE_LOG(ERR, EAL,
+				"epoll_wait returns with fail\n");
+			return 0;
+		}
+		/* epoll_wait timeout, will never happens here */
+		else if (nfds == 0)
+			return 0;
+		/* epoll_wait has at least one fd ready to read */
+		return(eal_intr_process_interrupts(events, nfds)); 
+}
+
+/**
+ * It builds/rebuilds up the epoll file descriptor with all the
+ * file descriptors being waited on. Then handles the interrupts.
+ *
+ * @param arg
+ *  pointer. (unused)
+ *
+ * @return
+ *  never return;
+ */
+
+static int pfd = 0;
+static unsigned numfds = 0;
+
+void *
+eal_intr_thread_main(__rte_unused void *arg)
+{
+	struct epoll_event ev;
+
+	/* host thread, never break out */
+		/* build up the epoll fd with all descriptors we are to
+		 * wait on then pass it to the handle_interrupts function
+		 */
+		static struct epoll_event pipe_event = {
+			.events = EPOLLIN | EPOLLPRI,
+		};
+		struct rte_intr_source *src;
+
+		/* create epoll fd */
+             if (0 == pfd) {
+		pfd = epoll_create(1);
+		if (pfd < 0)
+			rte_panic("Cannot create epoll instance\n");
+                else if (pfd == 0){
+                  	rte_panic("Cannot create epoll instance with pfd 0\n");
+                }
+		pipe_event.data.fd = intr_pipe.readfd;
+		/**
+		 * add pipe fd into wait list, this pipe is used to
+		 * rebuild the wait list.
+		 */
+		if (epoll_ctl(pfd, EPOLL_CTL_ADD, intr_pipe.readfd,
+						&pipe_event) < 0) {
+			rte_panic("Error adding fd to %d epoll_ctl, %s\n",
+					intr_pipe.readfd, strerror(errno));
+		}
+		numfds++;
+
+		rte_spinlock_lock(&intr_lock);
+
+		TAILQ_FOREACH(src, &intr_sources, next) {
+			if (src->callbacks.tqh_first == NULL)
+				continue; /* skip those with no callbacks */
+			ev.events = EPOLLIN | EPOLLPRI;
+			ev.data.fd = src->intr_handle.fd;
+
+			/**
+			 * add all the uio device file descriptor
+			 * into wait list.
+			 */
+			if (epoll_ctl(pfd, EPOLL_CTL_ADD,
+					src->intr_handle.fd, &ev) < 0){
+				rte_panic("Error adding fd %d epoll_ctl, %s\n",
+					src->intr_handle.fd, strerror(errno));
+			}
+			else
+				numfds++;
+		}
+		rte_spinlock_unlock(&intr_lock);
+             }
+		/* serve the interrupt */
+	     if (eal_intr_handle_interrupts(pfd, numfds) == -1) {
+
+		/**
+		 * when we return, we need to rebuild the
+		 * list of fds to monitor.
+		 */
+		close(pfd);
+                pfd = 0;
+             }
+   return NULL;
+}
+#else
 /**
  * It handles all the interrupts.
  *
@@ -860,12 +979,17 @@ eal_intr_thread_main(__rte_unused void *arg)
 		close(pfd);
 	}
 }
+#endif //PIOT
 
 int
 rte_eal_intr_init(void)
 {
+#ifndef RTE_LIBRW_PIOT
 	int ret = 0, ret_1 = 0;
 	char thread_name[RTE_MAX_THREAD_NAME_LEN];
+#else
+        int ret = 0;
+#endif
 
 	/* init the global interrupt source head */
 	TAILQ_INIT(&intr_sources);
@@ -876,7 +1000,8 @@ rte_eal_intr_init(void)
 	 */
 	if (pipe(intr_pipe.pipefd) < 0)
 		return -1;
-
+#ifdef RTE_LIBRW_PIOT
+#else
 	/* create the host thread to wait/handle the interrupt */
 	ret = pthread_create(&intr_thread, NULL,
 			eal_intr_thread_main, NULL);
@@ -892,7 +1017,7 @@ rte_eal_intr_init(void)
 			RTE_LOG(ERR, EAL,
 			"Failed to set thread name for interrupt handling\n");
 	}
-
+#endif
 	return -ret;
 }
 

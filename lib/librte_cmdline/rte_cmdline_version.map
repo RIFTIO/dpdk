@@ -66,7 +66,7 @@ DPDK_2.0 {
 	rdline_stop;
 	vt100_init;
 	vt100_parser;
-
+        cmdline_term_new;
 	local: *;
 };
 

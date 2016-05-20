@@ -154,6 +154,10 @@ _LDLIBS-$(CONFIG_RTE_LIBRTE_PMD_PCAP)       += -lrte_pmd_pcap
 _LDLIBS-$(CONFIG_RTE_LIBRTE_PMD_AF_PACKET)  += -lrte_pmd_af_packet
 _LDLIBS-$(CONFIG_RTE_LIBRTE_PMD_NULL)       += -lrte_pmd_null
 _LDLIBS-$(CONFIG_RTE_LIBRTE_PMD_QAT)        += -lrte_pmd_qat
+_LDLIBS-$(CONFIG_RTE_LIBRW_PIOT)       += -lrw_piot
+_LDLIBS-$(CONFIG_RTE_LIBRW_PIOT)       += -lrw_pmd_sim
+_LDLIBS-$(CONFIG_RTE_LIBRW_PIOT)       += -lrw_pmd_tun
+_LDLIBS-$(CONFIG_RTE_LIBRW_PIOT)       += -lrw_pmd_raw
 
 # AESNI MULTI BUFFER is dependent on the IPSec_MB library
 _LDLIBS-$(CONFIG_RTE_LIBRTE_PMD_AESNI_MB)   += -lrte_pmd_aesni_mb

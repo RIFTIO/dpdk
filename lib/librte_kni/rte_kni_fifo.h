@@ -91,3 +91,18 @@ kni_fifo_get(struct rte_kni_fifo *fifo, void **data, unsigned num)
 	fifo->read = new_read;
 	return i;
 }
+
+#ifdef RTE_LIBRW_PIOT
+
+static inline int
+kni_fifo_full(struct rte_kni_fifo *fifo) 
+{
+  return(((fifo->write + 1) & (fifo->len - 1)) == fifo->read);
+}
+
+static inline int
+kni_fifo_empty(struct rte_kni_fifo *fifo) 
+{
+  return(fifo->read == fifo->write);
+}
+#endif

@@ -233,7 +233,14 @@ static inline int rte_gettid(void)
 		RTE_PER_LCORE(_thread_id) = rte_sys_gettid();
 	return RTE_PER_LCORE(_thread_id);
 }
+#ifdef RTE_LIBRW_PIOT                                                                                               
 
+int rte_eal_init_no_thread(int argc, char **argv);
+typedef void (*rte_application_log_handler_t)(uint32_t level, const char *log);
+void rte_set_application_log_hook(rte_application_log_handler_t log_fn);
+void eal_exit_cleanup(void);
+
+#endif
 #ifdef __cplusplus
 }
 #endif

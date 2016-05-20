@@ -59,12 +59,17 @@
 #include <rte_spinlock.h>
 
 #include "rte_mempool.h"
-
+#ifndef RTE_LIBRW_PIOT
 TAILQ_HEAD(rte_mempool_list, rte_tailq_entry);
 
 static struct rte_tailq_elem rte_mempool_tailq = {
 	.name = "RTE_MEMPOOL",
 };
+#else
+struct rte_tailq_elem rte_mempool_tailq = {
+	.name = "RTE_MEMPOOL",
+};
+#endif
 EAL_REGISTER_TAILQ(rte_mempool_tailq)
 
 #define CACHE_FLUSHTHRESH_MULTIPLIER 1.5

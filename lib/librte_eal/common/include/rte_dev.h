@@ -184,7 +184,13 @@ void __attribute__((constructor, used)) devinitfn_ ##d(void)\
 {\
 	rte_eal_driver_register(&d);\
 }
-
+#ifdef RTE_LIBRW_PIOT
+  struct rte_driver* rte_eal_find_driver(const char *name);
+  int
+  rte_eal_non_pci_ethdev_init_by_devname(const char *driver,
+                                         const char *devname,
+                                         const char *param);
+#endif
 #ifdef __cplusplus
 }
 #endif

@@ -496,7 +496,14 @@ int rte_eal_pci_write_config(const struct rte_pci_device *device,
  */
 void pci_config_space_set(struct rte_pci_device *dev);
 #endif /* RTE_PCI_CONFIG */
-
+#ifdef RTE_LIBRW_PIOT
+struct rte_pci_device *
+rte_eal_pci_probe_by_pci_addr(const char *buff);
+  int
+pci_probe_all_drivers(struct rte_pci_device *dev);
+  int
+  rte_eal_pci_probe_one(const struct rte_pci_addr *addr);
+#endif
 #ifdef __cplusplus
 }
 #endif

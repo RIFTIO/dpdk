@@ -48,7 +48,9 @@
 #include <rte_log.h>
 
 #include "eal_private.h"
-
+#ifdef RTE_LIBRW_PIOT
+extern rte_application_log_handler_t rte_app_log_hook;
+#endif
 /*
  * default log function, used once mempool (hence log history) is
  * available
@@ -62,11 +64,18 @@ console_log_write(__attribute__((unused)) void *c, const char *buf, size_t size)
 
 	/* add this log in history */
 	rte_log_add_in_history(buf, size);
-
+#ifdef RTE_LIBRW_PIOT
+        ret = 0;
+        if (!rte_app_log_hook) {
+	  /* write on stdout */
+	  ret = fwrite(buf, 1, size, stdout);
+	  fflush(stdout);
+        }
+#else 
 	/* write on stdout */
 	ret = fwrite(buf, 1, size, stdout);
 	fflush(stdout);
-
+#endif /*PIOT*/
 	/* truncate message if too big (should not happen) */
 	if (size > BUFSIZ)
 		size = BUFSIZ;
@@ -78,7 +87,11 @@ console_log_write(__attribute__((unused)) void *c, const char *buf, size_t size)
 
 	/* write on syslog too */
 	syslog(loglevel, "%s", copybuf);
-
+#ifdef RTE_LIBRW_PIOT
+  if (rte_app_log_hook) {
+     rte_app_log_hook(rte_log_cur_msg_loglevel(), (const char *)copybuf);
+  }
+#endif
 	return ret;
 }
 

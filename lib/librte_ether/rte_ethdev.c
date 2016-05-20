@@ -1083,8 +1083,10 @@ rte_eth_dev_start(uint8_t port_id)
 		return diag;
 
 	rte_eth_dev_config_restore(port_id);
-
-	if (dev->data->dev_conf.intr_conf.lsc == 0) {
+#ifndef RTE_LIBRW_PIOT
+	if (dev->data->dev_conf.intr_conf.lsc == 0) 
+#endif
+        {
 		RTE_FUNC_PTR_OR_ERR_RET(*dev->dev_ops->link_update, -ENOTSUP);
 		(*dev->dev_ops->link_update)(dev, 0);
 	}
@@ -1611,7 +1613,11 @@ rte_eth_dev_info_get(uint8_t port_id, struct rte_eth_dev_info *dev_info)
 	RTE_FUNC_PTR_OR_RET(*dev->dev_ops->dev_infos_get);
 	(*dev->dev_ops->dev_infos_get)(dev, dev_info);
 	dev_info->pci_dev = dev->pci_dev;
-	dev_info->driver_name = dev->data->drv_name;
+#ifdef RTE_LIBRW_PIOT
+	if (dev->data->drv_name)
+#endif
+          dev_info->driver_name = dev->data->drv_name;
+          
 }
 
 void
@@ -3239,3 +3245,31 @@ rte_eth_copy_pci_info(struct rte_eth_dev *eth_dev, struct rte_pci_device *pci_de
 	eth_dev->data->numa_node = pci_dev->numa_node;
 	eth_dev->data->drv_name = pci_dev->driver->name;
 }
+#ifdef RTE_LIBRW_PIOT
+/*
+ * Find an eth device using pci_device
+ * Added by RiftIO Inc for PIOT Integration
+ */
+
+struct rte_eth_dev *
+rte_eth_dev_find_dev_by_pci(struct rte_pci_device *pci_dev)
+{
+  int i;
+  for (i=0; i < nb_ports; i++){
+    if (rte_eth_devices[i].pci_dev == pci_dev) {
+      return (&rte_eth_devices[i]);
+    }
+  }
+  return(NULL);
+}
+
+struct rte_eth_dev *
+rte_eth_dev_get_last_eth_dev(void)
+{
+  if (0 == nb_ports) {
+    return NULL;
+  }
+  return(&rte_eth_devices[nb_ports -1 ]);                                                                           
+}
+#endif
+
